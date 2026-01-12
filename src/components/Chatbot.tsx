@@ -1,134 +1,179 @@
-import React, { useState, useEffect, useRef } from 'react';
+// src/components/Chatbot.tsx
+import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MessageCircle, X, Send, Loader2 } from 'lucide-react';
+import OpenAI from 'openai';
 
-const Chatbot: React.FC = () => {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
+const openai = new OpenAI({
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true,
+});
+
+export default function Chatbot() {
+  const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open && inputRef.current) inputRef.current.focus();
-  }, [open]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
-    if (!trimmed) return;
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
 
-    const userMsg = { role: 'user' as const, text: trimmed };
-    setMessages((m) => [...m, userMsg]);
+    const userMessage = { role: 'user' as const, content: input.trim() };
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
-    setLoading(true);
+    setIsLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed }),
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini', // fast, cheap, excellent quality
+        messages: [
+          {
+            role: 'system',
+            content: `You are a calm, warm, professional assistant for AMUN Bright Minds Academy.
+Reply briefly, clearly, kindly. Use emojis sparingly.
+When appropriate, suggest booking a tour or contacting admissions.`,
+          },
+          ...messages,
+          userMessage,
+        ],
+        max_tokens: 300,
+        temperature: 0.7,
       });
 
-        const data = await res.json();
+      const reply = completion.choices[0]?.message?.content?.trim() ||
+        "Sorry, I couldn't respond right now. Feel free to message us directly!";
 
-      if (!res.ok) {
-        // Prefer the server-provided error message when available (helps with missing API key etc.)
-        const errMsg = data?.error || data?.details || `Server error: ${res.status}`;
-        setMessages((m) => [...m, { role: 'assistant', text: `Error: ${errMsg}` }]);
-        return;
-      }
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (err: any) {
+      console.error('OpenAI error:', err);
+      let friendly = "Oops! Something went wrong. You can reach us directly on WhatsApp!";
 
-      const { reply } = data;
-      setMessages((m) => [...m, { role: 'assistant', text: reply }]);
-    } catch (err) {
-      setMessages((m) => [...m, { role: 'assistant', text: 'Sorry — there was an error reaching the AI service.' }]);
-      // eslint-disable-next-line no-console
-      console.error(err);
+      if (err?.status === 429) friendly = "High demand — try again in a minute!";
+      if (err?.status === 401 || err?.status === 403) friendly = "API key issue — please check configuration.";
+
+      setMessages(prev => [...prev, { role: 'assistant', content: friendly }]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') sendMessage();
-  };
-
   return (
-    <div>
-      {/* Floating AI button (full circle) */}
-      <div className="fixed bottom-6 right-6 z-50 group">
-        {/* Tooltip / summary shown on hover (also available via title for accessibility) */}
-        <div className="hidden group-hover:block absolute bottom-full mb-2 right-0 w-max bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 px-3 py-2 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
-          AI Assistant — Ask about admissions, programs, fees, visiting hours, and policies
-        </div>
+    <>
+      {/* Floating Bubble */}
+      <motion.button
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full 
+                   bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700
+                   text-gray-700 dark:text-gray-300 shadow-lg hover:shadow-xl
+                   transition-all duration-300 flex items-center justify-center"
+        aria-label="Open AI Assistant"
+      >
+        <MessageCircle className="w-7 h-7" strokeWidth={2.2} />
+      </motion.button>
 
-        <button
-          onClick={() => setOpen((s) => !s)}
-          aria-label="Open AI assistant — Ask about admissions, programs, fees, visiting hours, and policies"
-          title="AI Assistant — Ask about admissions, programs, fees, visiting hours, and policies"
-          className="w-14 h-14 flex items-center justify-center rounded-full bg-white text-black dark:bg-black dark:text-white shadow-2xl border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-black/20 transition"
-        >
-          {/* Chat bubble icon */}
-          <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            <path d="M8 10h.01M12 10h.01M16 10h.01" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Modal */}
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/40" 
-            onClick={() => setOpen(false)}
-          />
-
-          <div className="relative w-full max-w-lg bg-white dark:bg-gray-900 rounded-2xl shadow-xl overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">AI Assistant</h3>
-              <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+      {/* Chat Window */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.94 }}
+            className="fixed bottom-24 right-6 z-50 w-[92vw] max-w-md h-[75vh] max-h-[680px]
+                       bg-white dark:bg-gray-950 rounded-3xl shadow-2xl
+                       border border-gray-200/60 dark:border-gray-800/60
+                       overflow-hidden flex flex-col backdrop-blur-xl"
+          >
+            {/* Header */}
+            <div className="px-5 py-4 bg-gray-50/90 dark:bg-gray-900/90 border-b dark:border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
+                  AI Assistant
+                </h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                  Powered by ChatGPT • Ask anything about admissions
+                </p>
+              </div>
+              <button onClick={() => setIsOpen(false)}>
+                <X className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+              </button>
             </div>
 
-            <div className="p-4 max-h-[60vh] overflow-y-auto space-y-4 bg-gray-50 dark:bg-gray-800">
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6 bg-gray-50/40 dark:bg-gray-950/30">
               {messages.length === 0 && (
-                <div className="text-sm text-gray-600 dark:text-gray-300">Ask any question about admissions, programs, or visiting the campus.</div>
+                <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 dark:text-gray-400">
+                  <MessageCircle className="w-12 h-12 mb-4 opacity-50" />
+                  <p className="text-base font-medium">How can I help today?</p>
+                  <p className="text-sm mt-2 opacity-70">
+                    Ask about admission, programs, tours, fees...
+                  </p>
+                </div>
               )}
 
-              {messages.map((m, idx) => (
-                <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`rounded-lg px-4 py-2 max-w-[80%] ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
-                    {m.text}
+              {messages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[85%] px-4 py-3 rounded-2xl text-[15px] md:text-base leading-relaxed shadow-sm
+                      ${msg.role === 'user'
+                        ? 'bg-blue-50 text-blue-900 dark:bg-blue-950/60 dark:text-blue-100 rounded-br-none'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-none'
+                      }`}
+                  >
+                    {msg.content}
                   </div>
                 </div>
               ))}
 
-              {loading && (
-                <div className="text-sm text-gray-500">AI is typing…</div>
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm">
+                    <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                  </div>
+                </div>
               )}
+
+              <div ref={messagesEndRef} />
             </div>
 
-            <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex gap-3 items-center">
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKey}
-                className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none"
-                placeholder="Ask the assistant..."
-                aria-label="Ask the assistant"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={loading}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                Send
-              </button>
+            {/* Input */}
+            <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+              <div className="flex gap-2">
+                <input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+                  placeholder="Ask anything..."
+                  className="flex-1 px-5 py-4 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 
+                             rounded-full text-base md:text-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20
+                             placeholder:text-gray-400 transition-all"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={isLoading || !input.trim()}
+                  className="p-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 
+                             text-white rounded-full transition-all duration-200 shadow-md
+                             disabled:opacity-50 disabled:pointer-events-none flex-shrink-0 min-w-14"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  ) : (
+                    <Send className="w-6 h-6" strokeWidth={2.4} />
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
-};
-
-export default Chatbot;
+}
